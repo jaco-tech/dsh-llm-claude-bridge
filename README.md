@@ -4,6 +4,11 @@ Claude Code subscription-backed model provider for DeepSeek Harness (`ctx.llm`).
 
 Routes all LLM calls through your **Claude Code subscription** (the `claude` CLI / Claude Agent SDK) — allowing DSH to drive Opus/Sonnet/Haiku at **no extra per-token cost** — instead of using the pay-per-token Anthropic API.
 
+This is a port of [`pi-claude-bridge`](https://github.com/elidickinson/pi-claude-bridge)
+— the extension that backs [pi](https://github.com/earendil-works/pi) with a Claude Code
+subscription — adapted from pi's `ExtensionAPI`/`pi-tui` seam to DeepSeek Harness's Cordis
+`ctx.llm`/`LlmAdapter` seam.
+
 ## Features
 
 - **Subscription Billing**: Uses your Claude Code subscription (Pro or Max plan) via the `claude` CLI.
@@ -26,24 +31,8 @@ Add to your DSH profile `cordis.patch.yml` (e.g. `~/.dsh/profiles/web/cordis.pat
         longContextExtraUsage: false
         strictMcpConfig: true
         autoMemoryEnabled: false
-        pathToClaudeCodeExecutable: '/home/jaco/.local/bin/claude'
+        pathToClaudeCodeExecutable: '$(which claude)' # or an explicit absolute path
 ```
-
-## Known limitations
-
-- **Tool results reach Claude Code only on the next turn.** DSH's agent loop is the
-  real tool executor: the adapter emits `tool-call` chunks, finishes the step with
-  `{kind: 'tool-calls'}`, and DSH runs the tool under its own sandbox and approval
-  policy. The in-process MCP handler therefore returns a placeholder string
-  immediately rather than blocking on the real result, so the Claude Code subprocess
-  may emit a sentence or two of filler ("let me wait for the result…") before the
-  step ends. The real result is picked up on the following turn, when the session is
-  rebuilt from DSH's history. Correct output, some wasted tokens.
-- **Verified paths.** Streaming (text + reasoning deltas), tool-call emission, and
-  multi-turn session resumption are covered by `tests/`. A full
-  call → result → follow-up turn round trip is not yet covered by an automated test.
-- **Attachments.** Image blocks are passed through by attachment id and media type;
-  binary payload wiring is untested.
 
 ## Known limitations
 
@@ -72,7 +61,13 @@ SDK-vs-subscription usage before; check your plan's terms before relying on this
 
 ## Available Models
 
-In DSH, select any of the following models under the `claude-bridge` provider:
+The model list is **derived at runtime from pi-ai's built-in `anthropic` catalog**
+(`getBuiltinModels("anthropic")`), projected through a small ordered allowlist — the same
+approach pi-claude-bridge uses. When pi-ai gains a new Claude model, it appears here
+automatically; only the Claude Code CLI-specific `[1m]` suffix / 1M-vs-200K context
+mapping is hardcoded, because that is CLI behavior the catalog does not encode.
+
+The current set exposed under the `claude-bridge` provider:
 
 - `claude-bridge/claude-opus-5` (1M context)
 - `claude-bridge/claude-opus-4-8` (1M context)
