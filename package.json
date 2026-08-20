@@ -55,6 +55,6 @@
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "tsc",
-    "test": "node tests/test-bridge.mjs && node tests/test-tools.mjs && node tests/test-multiturn.mjs"
+    "test": "node tests/test-bridge.mjs && node tests/test-tools.mjs && node tests/test-multiturn.mjs && node tests/test-tool-roundtrip.mjs"
   }
 }

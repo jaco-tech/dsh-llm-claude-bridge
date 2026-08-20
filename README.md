@@ -34,24 +34,25 @@ Add to your DSH profile `cordis.patch.yml` (e.g. `~/.dsh/profiles/web/cordis.pat
         pathToClaudeCodeExecutable: '$(which claude)' # or an explicit absolute path
 ```
 
-## Known limitations
+## Tool calling
 
-**Tool results are not fed back into the Claude Code subprocess (yet).**
+Verified end-to-end by `tests/test-tool-roundtrip.mjs`:
 
-DSH's agent loop is what actually executes tools — it reads the `tool-call` chunk this
-adapter emits, runs the tool under its own sandbox and approval policy, and the result
-arrives in the next turn's message history. That part works.
+1. **Turn 1** — the model emits a `tool-call` chunk (`get_weather`, `{"city":"Ghent"}`).
+   The adapter ends the turn at the tool-use boundary with `finish {kind:'tool-calls'}`
+   (`src/translate.ts`), so the subprocess never resolves the MCP call against a
+   placeholder.
+2. **DSH's loop** executes the tool under its own sandbox/approval policy and appends a
+   `tool-result` message.
+3. **Turn 2** — the result is replayed into the session history
+   (`src/serialize.ts`), the prompt becomes `(continue)`, and the model answers from the
+   **real result** (verified: it referenced the injected 23°C result).
 
-What does *not* work yet is the inline path: the in-process MCP server hands Claude Code
-a placeholder string (`(Tool <name> dispatched to DSH loop)`) instead of the real result,
-so the CLI may keep generating text against a stub before the turn ends. The fix is to
-block the MCP handler on the tool-call id until DSH reports the real result. Until then,
-expect occasional filler text such as "waiting for the result to come back" at the end of
-a tool-calling turn.
-
-Verified working: streaming (text + reasoning deltas), tool-call emission with raw JSON
-arguments, usage/finish ordering, and multi-turn session resumption. The tool-result round
-trip is the untested path.
+Known limitations:
+- **Attachments.** Image blocks are passed through by attachment id and media type;
+  binary payload wiring is untested.
+- The MCP server still answers in-process tool calls with a placeholder under
+  `CLAUDE_BRIDGE_DEBUG` — it is a debug aid, not a resolution path.
 
 ## Billing
 

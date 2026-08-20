@@ -34,6 +34,9 @@ export function createMcpToolServer(serverName: string, tools: BridgeToolDef[]) 
     if (!tool) throw new Error(`Unknown tool: ${request.params.name}`);
     const toolCallId = (request.params._meta?.[TOOL_USE_ID_META] as string) || `call_${Date.now()}`;
     const args = (request.params.arguments as Record<string, unknown>) ?? {};
+    if (process.env.CLAUDE_BRIDGE_DEBUG) {
+      console.error(`[claude-bridge] MCP CallTool invoked: ${request.params.name} id=${toolCallId}`);
+    }
     const result = await tool.handler(toolCallId, args);
     return {
       content: typeof result.content === "string"

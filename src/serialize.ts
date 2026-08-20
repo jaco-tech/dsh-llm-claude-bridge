@@ -28,11 +28,14 @@ export function convertDshMessages(
   let currentPrompt = "";
   let currentPromptBlocks: Array<Record<string, unknown>> | undefined;
 
-  // Find the last user turn (the trailing prompt for query())
+  // Find the last user turn (the trailing prompt for query()). A tool-result
+  // message is also a user turn: it is the most recent user message, so
+  // everything before it is history and it must be replayed in the session,
+  // not skipped by the old "last non-tool user message" heuristic.
   let lastUserIdx = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (msg && msg.role === "user" && msg.source.kind !== "tool") {
+    if (msg && msg.role === "user") {
       lastUserIdx = i;
       break;
     }
@@ -64,6 +67,18 @@ export function convertDshMessages(
     currentPrompt = textBlocks.join("\n");
     if (richBlocks.length > 1 || richBlocks.some((b) => b.type === "image")) {
       currentPromptBlocks = richBlocks;
+    }
+  }
+
+  // If the last user message is a tool-result with no text prompt, replay it
+  // in history (so the model sees the real result) and use a continuation
+  // prompt, rather than re-answering the original question that preceded it.
+  if (currentMsg && currentMsg.role === "user") {
+    const toolResults = currentMsg.content.filter((b) => b.type === "tool-result");
+    const hasText = currentMsg.content.some((b) => b.type === "text" && b.text);
+    if (toolResults.length > 0 && !hasText) {
+      currentPrompt = "(continue)";
+      history.push(currentMsg);
     }
   }
 

@@ -154,9 +154,18 @@ export async function* translateSdkQuery(
             name: block.toolName || "",
             arguments: block.partialJson || "{}",
           };
+          // OPTION C: end the turn at the tool_use boundary. Terminating the query
+          // here prevents the subprocess from resolving the tool call against an MCP
+          // placeholder — it never gets a fabricated result to continue from. DSH
+          // runs the tool and the next turn resumes with the real result in history.
+          sawToolCall = true;
         }
         closedBlocks.push(finalBlock);
         yield { type: "block-end", index: block.index, block: finalBlock };
+
+        if (finalBlock.type === "tool-call") {
+          break; // end stream at the tool-use boundary, before the subprocess resolves it
+        }
       } else if (event.type === "message_delta") {
         if (event.usage) {
           tokenUsage.outputTokens = event.usage.output_tokens ?? tokenUsage.outputTokens;
