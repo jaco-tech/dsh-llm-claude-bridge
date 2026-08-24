@@ -80,7 +80,7 @@ console.log(`finish reason: ${finishReason}, tool calls captured: ${calls.size}`
 
 if (calls.size < 2) {
   console.log("NOTE: model did not emit parallel calls this run — retrying with a forced nudge is fine, but the bug only reproduces with 2+ calls in one message.");
-  process.exit(2);
+  await adapter.dispose(); process.exit(2);
 }
 
 // Turn 2: deliver BOTH real results.
@@ -134,11 +134,11 @@ console.log();
 
 if (failed) {
   console.log(`FAIL: follow-up turn errored: ${failed.message}`);
-  process.exit(1);
+  await adapter.dispose(); process.exit(1);
 }
 if (/23/.test(text) && /265/.test(text)) {
   console.log("SUCCESS: both parallel tool results delivered; model referenced both (23°C and 265,000).");
-  process.exit(0);
+  await adapter.dispose(); process.exit(0);
 }
 console.log(`FAIL: model answer did not reference both results. Got: ${text.slice(0, 300)}`);
-process.exit(1);
+await adapter.dispose(); process.exit(1);

@@ -87,4 +87,4 @@ const sess2 = { ...tools, sessionId: `repro-${Date.now()}-b` };
 results.push(await run("5-system+session+tools(fresh)", sess2));
 
 console.log("\nREDS:", results.filter((r) => r.red).map((r) => r.label).join(", ") || "none");
-process.exit(results.some((r) => r.red) ? 1 : 0);
+await adapter.dispose(); process.exit(results.some((r) => r.red) ? 1 : 0);

@@ -81,4 +81,4 @@ const shortOK = out.short.addressed && !out.short.stub;
 console.log(
   `\nVERDICT: short=${shortOK ? "OK" : "RED"} long=${longOK ? "OK (no bug at adapter seam — check harness)" : "RED (adapter reproduces the stub — bridge bug)"}`,
 );
-process.exit(longOK ? 0 : 1);
+await adapter.dispose(); process.exit(longOK ? 0 : 1);

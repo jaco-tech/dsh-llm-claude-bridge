@@ -19,7 +19,7 @@ const messages = [
 
 const timeout = setTimeout(() => {
   console.error("TIMEOUT after 60s — adapter.stream() hung");
-  process.exit(2);
+  void adapter.dispose().finally(() => process.exit(2));
 }, 60000);
 
 console.log("starting stream...");
@@ -38,7 +38,7 @@ try {
   console.log(`\nDONE chunks=${chunks}`);
 } catch (e) {
   console.error("ERROR:", e.message);
-  process.exit(1);
+  await adapter.dispose(); process.exit(1);
 } finally {
   clearTimeout(timeout);
 }
