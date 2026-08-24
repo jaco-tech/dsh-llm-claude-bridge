@@ -148,13 +148,16 @@ export class ClaudeBridgeAdapter extends LlmAdapter {
         }
       } else {
         // First turn of a session (or a plain follow-up): push the prompt.
-        // Content-block prompts (images) are not supported on the streaming
-        // input channel; text joins the same way serialize builds it.
+        // Content-block prompts (images) are NOT supported on the streaming
+        // input channel — fail fast instead of silently dropping non-text
+        // blocks and sending an incomplete prompt to the subprocess.
+        if (currentPromptBlocks?.some((b) => b.type !== "text")) {
+          throw new Error(
+            "claude-bridge: image/non-text prompts are not supported on the live session channel",
+          );
+        }
         const text = currentPromptBlocks
-          ? currentPromptBlocks
-              .filter((b) => b.type === "text")
-              .map((b) => String(b.text ?? ""))
-              .join("\n")
+          ? currentPromptBlocks.map((b) => String(b.text ?? "")).join("\n")
           : currentPrompt;
         await this.liveSessions.pushUserMessage(
           session,

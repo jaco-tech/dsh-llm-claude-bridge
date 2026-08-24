@@ -31,7 +31,7 @@ import { query, type Query, type SDKUserMessage } from "@anthropic-ai/claude-age
 import type { ContentBlock, StreamChunk } from "@deepseek-ai/dsh-llm";
 import { CallId as makeCallId } from "@deepseek-ai/dsh-llm";
 import type { Config } from "./config.js";
-import { createMcpToolServer, TOOL_USE_ID_META, type BridgeToolDef } from "./mcp-server.js";
+import { createMcpToolServer, type BridgeToolDef } from "./mcp-server.js";
 import { makePromptStream, type PromptStream } from "./prompt-stream.js";
 import { normalizeToolName } from "./translate.js";
 
@@ -261,15 +261,20 @@ export class LiveSessionManager {
     const unmatched: string[] = [];
     for (const r of results) {
       const pending = session.pendingToolCalls.get(r.callId);
-      if (!pending) {
-        // Handler not invoked yet (sequential MCP invocation for parallel
-        // tool_use blocks) — queue the result so the handler resolves the
-        // moment it registers. Only truly unknown ids are reported unmatched.
-        session.queuedToolResults.set(r.callId, { content: r.text, isError: r.isError });
+      if (pending) {
+        session.pendingToolCalls.delete(r.callId);
+        pending.resolve({ content: r.text, isError: r.isError });
         continue;
       }
-      session.pendingToolCalls.delete(r.callId);
-      pending.resolve({ content: r.text, isError: r.isError });
+      if (session.queuedToolResults.has(r.callId)) {
+        // Duplicate delivery of an already-queued result — unexpected.
+        unmatched.push(r.callId);
+        continue;
+      }
+      // Handler not invoked yet (sequential MCP invocation for parallel
+      // tool_use blocks) — queue the result so the handler resolves the
+      // moment it registers.
+      session.queuedToolResults.set(r.callId, { content: r.text, isError: r.isError });
     }
     return unmatched;
   }
