@@ -25,6 +25,14 @@ export function apply(ctx: Context, config: Config): void {
 
   // Register adapter with the LLM service
   ctx.llm.registerAdapter([PROVIDER_ID], adapter);
+  // Live sessions keep a Claude Code subprocess per DSH session; they must
+  // not outlive the plugin (or hold a test process open). ctx.effect registers
+  // a disposer that runs when this plugin's fiber is disposed.
+  ctx.effect(() => {
+    return () => {
+      void adapter.dispose();
+    };
+  }, "llm-claude-bridge.liveSessions()");
 
   // Register with directory for model discovery and UI selectors
   ctx.llm.registerConfigurableProviders([
