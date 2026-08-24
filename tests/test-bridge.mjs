@@ -1,6 +1,8 @@
 import { ClaudeBridgeAdapter } from "../lib/adapter.js";
 import { Config } from "../lib/config.js";
 
+let adapter;
+
 async function run() {
   console.log("=== Testing ClaudeBridgeAdapter ===");
   const config = {
@@ -11,7 +13,7 @@ async function run() {
     pathToClaudeCodeExecutable: "/home/jaco/.local/bin/claude",
   };
 
-  const adapter = new ClaudeBridgeAdapter(() => config);
+  adapter = new ClaudeBridgeAdapter(() => config);
 
   console.log("1. Provider Info:", adapter.providerInfo("claude-bridge"));
 
@@ -59,7 +61,10 @@ async function run() {
   console.log("\n=== Done ===");
 }
 
-run().catch((err) => {
-  console.error("Test failed:", err);
-  process.exit(1);
-});
+run()
+  .then(async () => { await adapter.dispose(); process.exit(0); })
+  .catch(async (err) => {
+    console.error("Test failed:", err);
+    try { await adapter.dispose(); } catch {}
+    process.exit(1);
+  });

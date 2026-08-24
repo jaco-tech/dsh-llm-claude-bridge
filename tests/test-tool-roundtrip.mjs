@@ -68,7 +68,7 @@ console.log("\n--- turn 1 done ---");
 
 if (!callId || toolName !== "get_weather") {
   console.error("\nFAIL: turn 1 did not emit a get_weather tool call");
-  process.exit(1);
+  await adapter.dispose(); process.exit(1);
 }
 console.log(`tool call: ${toolName} args=${args}\n`);
 
@@ -128,11 +128,11 @@ console.log("\n--- turn 2 done ---");
 const mentions = /23°C|23 C|twenty-three|sunny|23°/.test(turn2Text);
 if (mentions) {
   console.log("\nSUCCESS: the model referenced the real tool result (23°C sunny) on follow-up.");
-  process.exit(0);
+  await adapter.dispose(); process.exit(0);
 } else {
   console.error("\nFAIL: model did not reference the real 23°C tool result in turn 2.");
   console.error("turn2Text:", JSON.stringify(turn2Text));
-  process.exit(1);
+  await adapter.dispose(); process.exit(1);
 }
 
 function stream(opts) {

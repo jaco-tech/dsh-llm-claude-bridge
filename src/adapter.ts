@@ -6,30 +6,29 @@ import {
   type LlmResolvedModelInfo,
   type StreamChunk,
 } from "@deepseek-ai/dsh-llm";
-import { query, type EffortLevel } from "@anthropic-ai/claude-agent-sdk";
 import type { Config } from "./config.js";
 import {
   listClaudeBridgeModels,
   resolveClaudeBridgeModelInfo,
   resolveContextWindow,
 } from "./models.js";
-import { convertDshMessages } from "./serialize.js";
-import { createMcpToolServer, toolsToBridgeDefs } from "./mcp-server.js";
-import { SessionManager } from "./session.js";
-import { translateSdkQuery } from "./translate.js";
-
-const CC_CHILD_ENV = {
-  ENABLE_CLAUDEAI_MCP_SERVERS: "0",
-  DISABLE_AUTO_COMPACT: "1",
-} as const;
+import { convertDshMessages, flattenText, sanitizeToolId } from "./serialize.js";
+import { toolsToBridgeDefs } from "./mcp-server.js";
+import { LiveSessionManager } from "./live-session.js";
 
 export class ClaudeBridgeAdapter extends LlmAdapter {
   private configSource: () => Config;
-  private sessionManager = new SessionManager();
+  private liveSessions: LiveSessionManager;
 
   constructor(configSource: () => Config) {
     super();
     this.configSource = configSource;
+    this.liveSessions = new LiveSessionManager(configSource);
+  }
+
+  /** Close every live Claude Code subprocess (tests / plugin teardown). */
+  async dispose(): Promise<void> {
+    await this.liveSessions.destroyAll();
   }
 
   override providerInfo(provider: string): LlmProviderInfo {
@@ -52,82 +51,73 @@ export class ClaudeBridgeAdapter extends LlmAdapter {
   }
 
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    const config = this.configSource();
-    const { cliModelId } = resolveContextWindow(options.model, config);
+    const { cliModelId } = resolveContextWindow(options.model, this.configSource());
     const cwd = process.cwd();
+    const dshSessionId = options.sessionId || "default";
 
-    // Convert conversation history
-    const { historyMessages, currentPrompt, currentPromptBlocks } = convertDshMessages(
-      options.messages,
-    );
+    if (process.env.CLAUDE_BRIDGE_DEBUG) {
+      const dump = (options.messages ?? []).map((m, i) => ({
+        i,
+        role: m.role,
+        kind: m.source?.kind,
+        blockTypes: m.content?.map((b: { type: string }) => b.type),
+        textHead: (m.content ?? [])
+          .filter((b: { type: string }) => b.type === "text")
+          .map((b) => (b as { text: string }).text.slice(0, 120))
+          .join(" | ")
+          .slice(0, 200),
+      }));
+      const line =
+        `[cb-debug] stream sessionId=${dshSessionId} msgs=${options.messages?.length} ` +
+        `live=${this.liveSessions.has(dshSessionId)} signal=${Boolean(options.signal)} tools=${options.tools?.length ?? 0}\n` +
+        `[cb-debug] messages=${JSON.stringify(dump)}`;
+      console.error(line);
+      try {
+        const fs = await import("node:fs");
+        fs.appendFileSync("/tmp/cb-debug.log", line + "\n");
+      } catch {}
+    }
 
-    // Sync session state to disk for resumption
-    const resumeSessionId = await this.sessionManager.syncSession(
-      options.sessionId,
-      historyMessages,
-      cwd,
+    const { currentPrompt, currentPromptBlocks } = convertDshMessages(options.messages);
+
+    // Extract tool results from the trailing user turn: they resolve the
+    // MCP handlers parked by the previous turn's tool calls.
+    const toolResults: Array<{ callId: string; text: string; isError?: boolean }> = [];
+    for (let i = options.messages.length - 1; i >= 0; i--) {
+      const msg = options.messages[i];
+      if (msg.role !== "user") break;
+      for (const block of msg.content) {
+        if (block.type === "tool-result") {
+          toolResults.unshift({
+            callId: sanitizeToolId(block.toolCallId),
+            text: flattenText(block.content) || "(no output)",
+            isError: block.isError ?? false,
+          });
+        }
+      }
+    }
+
+    const isContinuation = this.liveSessions.has(dshSessionId);
+
+    const session = this.liveSessions.ensure(dshSessionId, {
       cliModelId,
-    );
-
-    // Setup in-process MCP server for DSH tools
-    const mcpTools = toolsToBridgeDefs(options.tools, async (callId, name, args) => {
-      // Return placeholder result to unblock MCP call; DSH loop will handle actual execution
-      return {
-        toolCallId: callId,
-        content: `(Tool ${name} dispatched to DSH loop)`,
-      };
+      cwd,
+      system: options.system,
+      reasoningEffort: options.reasoningEffort,
+      tools: toolsToBridgeDefs(options.tools, async () => {
+        // Unreachable: LiveSessionManager wraps handlers itself.
+        return { toolCallId: "", content: "" };
+      }),
     });
 
-    const mcpServers = mcpTools.length > 0
-      ? { "dsh-tools": createMcpToolServer("dsh-tools", mcpTools) }
-      : undefined;
+    // Arm this turn's pump BEFORE releasing any parked MCP handlers — the
+    // subprocess's continuation events must land in this turn, not the void.
+    const turnStream = this.liveSessions.beginTurn(session);
 
-    // Map reasoning effort to Agent SDK EffortLevel
-    let effort: EffortLevel | undefined;
-    if (options.reasoningEffort && options.reasoningEffort !== "off") {
-      effort = options.reasoningEffort as EffortLevel;
-    }
-
-    const extraArgs: Record<string, string | null> = { model: cliModelId };
-    if (config.strictMcpConfig) {
-      extraArgs["strict-mcp-config"] = null;
-    }
-    if (effort) {
-      extraArgs["thinking-display"] = "summarized";
-    }
-
-    const queryOptions: NonNullable<Parameters<typeof query>[0]["options"]> = {
-      cwd,
-      env: { ...process.env, ...CC_CHILD_ENV },
-      tools: [], // Disable CLI built-in tools so execution goes through DSH
-      permissionMode: "bypassPermissions",
-      includePartialMessages: true,
-      settings: {
-        autoMemoryEnabled: config.autoMemoryEnabled,
-      },
-      systemPrompt: options.system
-        ? { type: "preset", preset: "claude_code", append: options.system }
-        : { type: "preset", preset: "claude_code" },
-      extraArgs,
-      ...(effort ? { effort } : {}),
-      ...(mcpServers ? { mcpServers } : {}),
-      ...(resumeSessionId ? { resume: resumeSessionId } : {}),
-      ...(config.pathToClaudeCodeExecutable
-        ? { pathToClaudeCodeExecutable: config.pathToClaudeCodeExecutable }
-        : {}),
-    };
-
-    const prompt = currentPromptBlocks ? (currentPromptBlocks as any) : currentPrompt;
-    const sdkQuery = query({ prompt, options: queryOptions });
-
-    // Wire cancellation
+    // Wire cancellation for this turn only; the subprocess survives.
     const onAbort = () => {
-      void sdkQuery.interrupt().catch(() => {});
-      try {
-        sdkQuery.close();
-      } catch {}
+      void session.sdkQuery.interrupt().catch(() => {});
     };
-
     if (options.signal) {
       if (options.signal.aborted) {
         onAbort();
@@ -137,21 +127,50 @@ export class ClaudeBridgeAdapter extends LlmAdapter {
     }
 
     try {
-      yield* translateSdkQuery(sdkQuery, options.signal, (capturedId) => {
-        this.sessionManager.recordCapturedSessionId(
-          options.sessionId,
-          capturedId,
-          cwd,
-          options.messages.length,
+      if (isContinuation && toolResults.length > 0) {
+        const unmatched = this.liveSessions.deliverToolResults(session, toolResults);
+        if (unmatched.length > 0 && process.env.CLAUDE_BRIDGE_DEBUG) {
+          const line = `[cb-debug] unmatched tool results: ${unmatched.join(",")}`;
+          console.error(line);
+          try {
+            const fs = await import("node:fs");
+            fs.appendFileSync("/tmp/cb-debug.log", line + "\n");
+          } catch {}
+        }
+        // If the turn also carries a fresh text instruction (shouldn't in the
+        // normal tool loop), push it after the results.
+        if (currentPrompt && currentPrompt !== "(continue)") {
+          await this.liveSessions.pushUserMessage(
+            session,
+            currentPrompt,
+            session.capturedSessionId ?? dshSessionId,
+          );
+        }
+      } else {
+        // First turn of a session (or a plain follow-up): push the prompt.
+        // Content-block prompts (images) are NOT supported on the streaming
+        // input channel — fail fast instead of silently dropping non-text
+        // blocks and sending an incomplete prompt to the subprocess.
+        if (currentPromptBlocks?.some((b) => b.type !== "text")) {
+          throw new Error(
+            "claude-bridge: image/non-text prompts are not supported on the live session channel",
+          );
+        }
+        const text = currentPromptBlocks
+          ? currentPromptBlocks.map((b) => String(b.text ?? "")).join("\n")
+          : currentPrompt;
+        await this.liveSessions.pushUserMessage(
+          session,
+          text,
+          session.capturedSessionId ?? dshSessionId,
         );
-      });
+      }
+
+      yield* turnStream;
     } finally {
       if (options.signal) {
         options.signal.removeEventListener("abort", onAbort);
       }
-      try {
-        sdkQuery.close();
-      } catch {}
     }
   }
 }
