@@ -1,18 +1,18 @@
 import type {
-  CallId,
+  ToolCallId,
   ContentBlock,
   FinishReason,
   StreamChunk,
   TokenUsage,
 } from "@deepseek-ai/dsh-llm";
-import { CallId as makeCallId } from "@deepseek-ai/dsh-llm";
+import { ToolCallId as makeCallId } from "@deepseek-ai/dsh-llm";
 import type { Query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 interface ActiveBlock {
   index: number;
   type: "text" | "reasoning" | "tool-call";
   text: string;
-  toolCallId?: CallId;
+  toolCallId?: ToolCallId;
   toolName?: string;
   partialJson?: string;
 }
