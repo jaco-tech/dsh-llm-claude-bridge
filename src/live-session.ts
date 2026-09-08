@@ -29,7 +29,7 @@
 
 import { query, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ContentBlock, StreamChunk } from "@deepseek-ai/dsh-llm";
-import { CallId as makeCallId } from "@deepseek-ai/dsh-llm";
+import { ToolCallId as makeCallId } from "@deepseek-ai/dsh-llm";
 import type { Config } from "./config.js";
 import { createMcpToolServer, type BridgeToolDef } from "./mcp-server.js";
 import { makePromptStream, type PromptStream } from "./prompt-stream.js";

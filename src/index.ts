@@ -1,19 +1,19 @@
+import "@deepseek-ai/dsh-settings";
 import type { Context } from "@deepseek-ai/cordis";
-import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+
 import { Config } from "./config.js";
 import { ClaudeBridgeAdapter } from "./adapter.js";
 
 export const name = "llm-claude-bridge";
-export const inject = ["llm"];
+export const inject = ["llm", "settings"];
 
-const NS = settingsNamespace("llm-claude-bridge");
 export const PROVIDER_ID = "claude-bridge";
 
 export function apply(ctx: Context, config: Config): void {
   let current = () => config;
 
-  installSettingsSection(ctx, NS, Config, config, {
-    setSource: (source) => {
+  ctx.settings.installSection(ctx, "llm-claude-bridge", Config, config, {
+    setSource: (source: () => Config) => {
       current = source;
     },
     onChange: () => {
